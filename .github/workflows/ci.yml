@@ -1,0 +1,53 @@
+name: CI
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Poetry
+        uses: "./.github/actions/setup_poetry"
+        with:
+          PYTHON_VERSION: "3.10"
+
+      - name: Run tests
+        if: always()
+        run: poetry run pytest -v
+
+      - name: Run coverage
+        if: always()
+        run: poetry run pytest --cov=py_lru tests/
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Poetry
+        uses: "./.github/actions/setup_poetry"
+        with:
+          PYTHON_VERSION: "3.10"
+
+      - name: Ruff lint
+        if: always()
+        run: |
+          poetry run ruff check .
+
+      - name: Ruff fmt
+        if: always()
+        run: |
+          poetry run ruff format --check .
+
+      - name: Mypy
+        if: always()
+        run: |
+          poetry run mypy .
