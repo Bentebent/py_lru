@@ -6,6 +6,18 @@
             "source.fixAll": "never",
             "source.organizeImports": "explicit"
         },
-        "editor.defaultFormatter": "charliermarsh.ruff"
+        "editor.defaultFormatter": "charliermarsh.ruff",
+    },
+    "files.exclude": {
+        "**/.git": true,
+        "**/.svn": true,
+        "**/.hg": true,
+        "**/CVS": true,
+        "**/.DS_Store": true,
+        "**/Thumbs.db": true,
+        "**/.mypy_cache": true,
+        "**/.pytest_cache": true,
+        "**/__pycache__": true,
+        "**/.ruff_cache": true,
     }
 }
