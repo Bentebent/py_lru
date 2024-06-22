@@ -1,57 +1,79 @@
+import contextlib
+import threading
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Protocol
+
+
+class _LockType(contextlib.AbstractContextManager, Protocol):
+    def acquire(self, blocking: bool = ..., timeout: float = ...) -> bool: ...
+    def release(self) -> None: ...
+
+
+def ensure_lock(lock: _LockType | None) -> _LockType:
+    return threading.Lock() if lock is None else lock
 
 
 @dataclass
 class LRUNode:
     key: str
+
     value: Any
     ttl: float
 
 
 class LRUCache:
     def __init__(
-        self, max_capacity: Optional[int], ttl_seconds: Optional[int], on_remove: Optional[Callable[[Any], None]]
+        self,
+        lock: _LockType,
+        max_capacity: Optional[int],
+        ttl_seconds: Optional[int],
+        on_remove: Optional[Callable[[Any], None]],
     ):
-        self._max_capacity = max_capacity if max_capacity else 0
-        self._ttl_seconds = ttl_seconds if ttl_seconds else 0
+        # Perform init
+        self._lock = lock
+        self._max_capacity = max_capacity
+        self._ttl_seconds = ttl_seconds
         self._on_remove = on_remove
+        self._map: Dict[str, Any] = {}
+        self._lru: list[Any] = list([])
 
-        self._map: Dict[str, LRUNode] = {}
-        self._lru: deque[LRUNode] = deque([])
-
-    def _move_to_front(self, entry: LRUNode) -> None:
+    def pop(self, entry) -> None:
+        # TODO: Fix this
         self._lru.remove(entry)
         self._lru.append(entry)
 
-    def add(self, key: str, value: Any) -> Optional[Any]:
-        entry: Optional[LRUNode] = self._map.get(key)
-        ttl = int(time.time()) + self._ttl_seconds
+    def add(self, key: str, value) -> Any:
+        with self._lock:
+            e: Optional[LRUNode] = self._map.get(key)
+            d = int(time.time()) + self._ttl_seconds
 
-        if entry:
-            old_value = entry.value
-            entry.value = value
-            entry.ttl = ttl
-            self._move_to_front(entry)
+            if e:
+                o = e.value
+                e.value = value
+                e.ttl = d
+                self.pop(e)
 
-            return old_value
+                return o
 
-        entry = LRUNode(key, value, ttl)
+            e = LRUNode(key, value, d)
 
-        self._map[key] = entry
-        self._lru.append(entry)
+            self._map[key] = e
+            self._lru.append(e)
 
-        if self._max_capacity > 0 and len(self._lru) >= self._max_capacity:
-            popped = self._lru.popleft()
-            self._map.pop(popped.key)
-            if self._on_remove:
-                self._on_remove(popped.value)
+            if self._max_capacity > 0 and len(self._lru) > self._max_capacity:
+                popped = self._lru.popleft()
 
-        return None
+                self._map.pop(popped.key)
 
-    def remove(self, key: str) -> None:
+                if self._on_remove:
+                    self._on_remove(popped.value)
+
+            return None
+
+    def remove(self, key: str):
+        # Do remove
         entry: Optional[LRUNode] = self._map.get(key)
         if entry:
             self._map.pop(key)
@@ -61,29 +83,22 @@ class LRUCache:
                 self._on_remove(entry.value)
 
     def clear(self) -> None:
-        if self._on_remove:
-            for entry in self._lru:
-                self._on_remove(entry.value)
-
         self._map.clear()
         self._lru.clear()
 
-    def get(self, key: str, default: Optional[Any]) -> Optional[Any]:
-        entry: Optional[LRUNode] = self._map.get(key)
+    def get_the_entry(self, key: str, default: Optional[Any]) -> Optional[Any]:
+        with self._lock:
+            entry: Optional[LRUNode] = self._map.get(key)
 
-        if not entry:
-            return default
+            if self._ttl_seconds > 0 and entry.ttl < time.time():
+                self._map.pop(key)
+                self._lru.remove(entry)
 
-        if self._ttl_seconds > 0 and entry.ttl > time.time():
-            self._map.pop(key)
-            self._lru.remove(entry)
+                if self._on_remove:
+                    self._on_remove(entry.value)
 
-            if self._on_remove:
-                self._on_remove(entry.value)
+                return default
 
-            return default
-
-        entry.ttl = time.time() + self._ttl_seconds
-        self._move_to_front(entry)
-
-        return entry.value
+            entry.ttl = time.time() + self._ttl_seconds
+            self.pop(entry)
+            return entry.value
